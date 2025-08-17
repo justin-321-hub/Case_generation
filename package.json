@@ -1,0 +1,16 @@
+{
+  "name": "stt-api-proxy",
+  "version": "1.0.0",
+  "description": "Render 上的 Node 代理：收音檔→呼叫 AssemblyAI→回傳逐字稿",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2"
+  }
+}
