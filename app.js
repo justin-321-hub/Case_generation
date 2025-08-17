@@ -6,7 +6,7 @@
 // ✅ 部署時改成你的 Render 後端網域
 const API_BASE = (location.hostname === 'localhost')
   ? 'http://localhost:8000'
-  : 'https://YOUR-RENDER-API.onrender.com'; // ← TODO: 改為你的 Render 網域
+  : 'https://case-generation.onrender.com'; // ← TODO: 改為你的 Render 網域
 
 const elFile = document.getElementById('file');
 const elBtnUpload = document.getElementById('btnUpload');
@@ -141,3 +141,4 @@ elBtnUpload.addEventListener('click', async () => {
 
 // 初始化
 bindTimeupdate();
+
