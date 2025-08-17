@@ -2,12 +2,12 @@
  * 後端（Render）：Node/Express 代理 → 呼叫 AssemblyAI 雲端 API
  * 目的：
  *  - 隱藏金鑰（放在後端環境變數）
- *  - 前端僅需呼叫 /api/transcribe，上傳音檔即可
+ *  - 前端僅需呼叫 /api/transcribe 上傳音檔
  * 流程：
- *  1) 前端以 multipart/form-data 上傳 audio 檔到 /api/transcribe
- *  2) 後端把檔案 buffer 直接串流到 AssemblyAI /v2/upload
- *  3) 建立轉錄工作 /v2/transcribe
- *  4) 輪詢狀態直到完成，回傳 { text, words:[{start,end,word}] }
+ *  1) 前端上傳 multipart/form-data：欄位名 audio
+ *  2) 後端把檔案 buffer 串流到 AAI /v2/upload 取得 upload_url
+ *  3) 建立轉錄工作到 AAI /v2/transcript
+ *  4) 輪詢 /v2/transcript/{id} 直到完成，回傳 { text, words:[{start,end,word}] }
  */
 
 const express = require('express');
@@ -15,64 +15,71 @@ const multer = require('multer');
 const cors = require('cors');
 const { setTimeout: sleep } = require('timers/promises');
 
-// node-fetch v3 為 ESM，這裡用動態 import 避免改成 type:module
+// node-fetch v3 為 ESM，這裡用動態 import
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 const app = express();
-const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } }); // 上限 100MB，可依需求調整
+const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB 可調整
 
 // ====== 讀環境變數 ======
 const PORT = process.env.PORT || 8000;
-const AAI_API_KEY = process.env.AAI_API_KEY || ''; // ← 在 Render 設定
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',');
+const AAI_API_KEY = process.env.AAI_API_KEY || ''; // ← 到 Render 設定
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
-// ====== CORS：建議正式上線時把 * 改為你的 GH Pages 網域 ======
-app.use(cors({
-  origin(origin, cb) {
-    if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error('CORS blocked'), false);
-  }
-}));
+// ====== CORS：建議上線時把 * 改為你的 Pages 網域 ======
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin) return cb(null, true); // 允許 curl / 健康檢查
+      if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
+    optionsSuccessStatus: 200,
+  })
+);
+app.options('*', cors()); // 處理 preflight
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
-// ====== 將檔案 buffer 直接上傳至 AssemblyAI /v2/upload ======
+// ====== 上傳到 AssemblyAI /v2/upload，取得 upload_url ======
 async function aaiUpload(buffer) {
   const resp = await fetch('https://api.assemblyai.com/v2/upload', {
     method: 'POST',
     headers: {
       authorization: AAI_API_KEY,
-      // 使用 chunked 可避免需先知檔案大小；node-fetch 會處理
-      'transfer-encoding': 'chunked'
+      'transfer-encoding': 'chunked',
     },
-    body: buffer
+    body: buffer,
   });
   if (!resp.ok) {
     const t = await resp.text().catch(() => '');
+    // 常見：401/403 = API Key 錯；413 = 檔案過大；5xx = 供應商暫時錯誤
     throw new Error(`Upload failed: ${resp.status} ${t}`);
   }
-  const data = await resp.json();
-  // data.upload_url 形如 https://cdn.assemblyai.com/upload/xxxx
+  const data = await resp.json(); // { upload_url: "..." }
   return data.upload_url;
 }
 
-// ====== 建立轉錄任務 ======
+// ====== 建立轉錄任務（正確 endpoint：/v2/transcript） ======
 async function aaiCreateTranscription(uploadUrl) {
-  // 這裡可依需求開啟更多功能（如 speaker_labels、entity detection 等）
   const payload = {
     audio_url: uploadUrl,
     language_detection: true,
     punctuate: true,
-    format_text: true
+    format_text: true,
+    // 需要話者分離可加：speaker_labels: true
+    // 需要特定模型可加：speech_model: "universal"（可省略使用預設）
   };
-  const resp = await fetch('https://api.assemblyai.com/v2/transcribe', {
+  const resp = await fetch('https://api.assemblyai.com/v2/transcript', {
     method: 'POST',
     headers: {
       authorization: AAI_API_KEY,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
   if (!resp.ok) {
     const t = await resp.text().catch(() => '');
@@ -81,11 +88,11 @@ async function aaiCreateTranscription(uploadUrl) {
   return resp.json(); // { id: "..." }
 }
 
-// ====== 輪詢直到完成 ======
+// ====== 輪詢狀態直到完成（正確 endpoint：/v2/transcript/{id}） ======
 async function aaiPoll(id) {
   while (true) {
-    const resp = await fetch(`https://api.assemblyai.com/v2/transcribe/${id}`, {
-      headers: { authorization: AAI_API_KEY }
+    const resp = await fetch(`https://api.assemblyai.com/v2/transcript/${id}`, {
+      headers: { authorization: AAI_API_KEY },
     });
     if (!resp.ok) {
       const t = await resp.text().catch(() => '');
@@ -94,12 +101,11 @@ async function aaiPoll(id) {
     const data = await resp.json();
     if (data.status === 'completed') return data;
     if (data.status === 'error') throw new Error(data.error || 'Transcription error');
-    // 2 秒輪詢一次，避免太頻繁
-    await sleep(2000);
+    await sleep(2000); // 2 秒輪詢一次
   }
 }
 
-// ====== 主要端點：接收音檔並回傳逐字稿 ======
+// ====== 主要端點：接音檔並回傳逐字稿 ======
 app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
   try {
     if (!AAI_API_KEY) return res.status(500).json({ error: '後端未設定 AAI_API_KEY' });
@@ -109,11 +115,11 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
     const task = await aaiCreateTranscription(uploadUrl);
     const done = await aaiPoll(task.id);
 
-    // 統一輸出格式：words: [{start,end,word}]；start/end 由毫秒轉為秒（float）
+    // words 為毫秒，轉成秒（float）
     const words = (done.words || []).map(w => ({
       start: (w.start ?? 0) / 1000,
-      end:   (w.end ?? 0) / 1000,
-      word:  w.text
+      end: (w.end ?? 0) / 1000,
+      word: w.text,
     }));
 
     res.json({ text: done.text || '', words });
