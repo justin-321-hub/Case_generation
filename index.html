@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>語音問診逐字稿（API 版）</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <meta name="description" content="上傳音檔→雲端轉錄→逐字稿可編輯、可下載、播放對字同步" />
+</head>
+<body>
+  <div class="container">
+    <!-- 標題區 -->
+    <header class="header">
+      <h1>語音問診逐字稿（API 版）</h1>
+      <p class="sub">上傳音訊 → 雲端轉錄（AssemblyAI）→ 逐字稿可編輯、字級可調、播放時逐字同步、可下載</p>
+    </header>
+
+    <!-- 上傳與控制列 -->
+    <section class="card">
+      <div class="controls">
+        <div class="control">
+          <label class="label">選擇音訊檔（格式不限）</label>
+          <input id="file" type="file" accept="audio/*" />
+          <p class="hint">檔案不會保留在後端；後端僅作為 API 代理，把資料串流到 STT 服務。</p>
+        </div>
+        <div class="control row">
+          <button id="btnUpload" class="btn">上傳並轉錄</button>
+          <label class="label-inline">字級：</label>
+          <input id="fontRange" type="range" min="14" max="36" value="20" />
+          <button id="btnDownloadTxt" class="btn-outline">下載逐字稿（.txt）</button>
+          <button id="btnDownloadJson" class="btn-outline">下載時間標記（.json）</button>
+        </div>
+      </div>
+      <div id="progress" class="progress hidden">等待上傳…</div>
+    </section>
+
+    <!-- 播放器 -->
+    <section class="card">
+      <audio id="player" controls class="player"></audio>
+    </section>
+
+    <!-- 逐字稿（可編輯） -->
+    <section class="card">
+      <div class="title-row">
+        <h2>逐字稿（可編輯）</h2>
+        <span id="stats" class="stats"></span>
+      </div>
+      <div id="transcript" class="transcript" contenteditable="true" spellcheck="false"></div>
+    </section>
+
+    <footer class="footer">© API 版 Demo · 前端 GitHub Pages · 後端 Render（Node 代理 AssemblyAI）</footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
