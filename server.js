@@ -215,4 +215,70 @@ async function aaiPoll(id) {
 }
 
 // ====== 新：回傳分離後的 vocal（給前端播放） ======
-app.post('/api/preview-vocals',
+app.post('/api/preview-vocals', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '請以上傳 audio 檔案' });
+
+    let playable;
+    try {
+      const { playableWav } = await separateVocalWithDemucs(req.file.buffer);
+      playable = playableWav; // 44.1k/雙聲道 vocal
+    } catch (e) {
+      console.warn('[demucs] failed, fallback to denoise preview:', e?.message || e);
+      // 退回舊的「降噪版預覽」
+      playable = await denoiseToWav(req.file.buffer);
+    }
+
+    res.setHeader('Content-Type', 'audio/wav');
+    res.send(playable);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || '產生 vocal 預覽失敗' });
+  }
+});
+
+// ====== 主要端點：分離 vocal → 轉錄 ======
+app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
+  try {
+    if (!AAI_API_KEY) return res.status(500).json({ error: '後端未設定 AAI_API_KEY' });
+    if (!req.file) return res.status(400).json({ error: '請以 audio 欄位上傳音檔' });
+
+    const wantSpeaker = req.body && (req.body.speaker_labels === '1' || req.body.speaker_labels === 'true');
+
+    // 1) 先用 Demucs 分離 vocal；失敗就 fallback 到降噪
+    let sttAudio;
+    try {
+      const { sttWav } = await separateVocalWithDemucs(req.file.buffer);
+      sttAudio = sttWav; // 16k/mono vocal
+    } catch (e) {
+      console.warn('[demucs] failed, fallback to denoise for STT:', e?.message || e);
+      sttAudio = await denoiseToWav(req.file.buffer);
+    }
+
+    // 2) 上傳到 AAI
+    const uploadUrl = await aaiUpload(sttAudio);
+    const task = await aaiCreateTranscription(uploadUrl, { speaker_labels: wantSpeaker });
+    const done = await aaiPoll(task.id);
+
+    // 3) 規整輸出
+    const words = (done.words || []).map(w => ({
+      start: (w.start ?? 0) / 1000,
+      end: (w.end ?? 0) / 1000,
+      word: w.text,
+    }));
+
+    res.json({
+      text: done.text || '',
+      words,
+      utterances: Array.isArray(done.utterances) ? done.utterances : undefined,
+      note: '音訊以 Demucs 分離的 vocal（或降噪 fallback）送往 STT'
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || '轉錄發生錯誤' });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`API proxy listening on http://0.0.0.0:${PORT}`);
+});
