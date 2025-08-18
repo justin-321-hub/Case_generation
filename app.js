@@ -107,4 +107,150 @@ function findActiveIndexByTime(t) {
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const tokenIdx = idxMapNonPunc[mid];
-    const span = elTranscript.querySelector(`.word[data-idx="${tokenIdx}"]`
+    const span = elTranscript.querySelector(`.word[data-idx="${tokenIdx}"]`);
+    if (!span) break;
+    const s = parseFloat(span.dataset.start);
+    const e = parseFloat(span.dataset.end);
+    if (isNaN(s) || isNaN(e)) {
+      lo = mid + 1;
+      continue;
+    }
+    if (t < s) hi = mid - 1;
+    else if (t > e) lo = mid + 1;
+    else return tokenIdx;
+  }
+  return -1;
+}
+
+/** 播放時逐字高亮（忽略標點，效能優化） */
+function bindTimeupdate() {
+  let ticking = false;
+  elPlayer.addEventListener('timeupdate', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const t = elPlayer.currentTime;
+      const active = findActiveIndexByTime(t);
+      if (active !== lastActiveIdx) {
+        // 先移除舊的
+        if (lastActiveIdx >= 0) {
+          const prev = elTranscript.querySelector(`.word[data-idx="${lastActiveIdx}"]`);
+          if (prev) prev.classList.remove('active');
+        }
+        // 再加新的
+        if (active >= 0) {
+          const cur = elTranscript.querySelector(`.word[data-idx="${active}"]`);
+          if (cur && !cur.classList.contains('punc')) {
+            cur.classList.add('active');
+            cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+        lastActiveIdx = active;
+      }
+      ticking = false;
+    });
+  });
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadJSON(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// 字級調整：用 CSS 變數控制（父層 font-size:0，不受影響）
+elFontRange.addEventListener('input', () => {
+  elTranscript.style.setProperty('--fz', `${elFontRange.value}px`);
+});
+
+// 下載 .txt：用畫面上的 tokens 串回字串（不插空白，標點自然連接）
+elBtnDownloadTxt.addEventListener('click', () => {
+  const spans = Array.from(elTranscript.querySelectorAll('.word'));
+  const text = spans.map(s => s.textContent).join('').replace(/\s+/g, '').trim();
+  if (!text) return alert('目前沒有逐字稿內容');
+  downloadText('transcript.txt', text);
+});
+
+// 下載 .json：輸出畫面 tokens（含 isPunc 與原時間戳）
+elBtnDownloadJson.addEventListener('click', () => {
+  const edited = Array.from(elTranscript.querySelectorAll('.word')).map(span => ({
+    start: parseFloat(span.dataset.start),
+    end: parseFloat(span.dataset.end),
+    word: span.textContent,
+    isPunc: span.classList.contains('punc')
+  }));
+  if (!edited.length && !elTranscript.innerText.trim()) {
+    return alert('目前沒有逐字稿內容');
+  }
+  downloadJSON('transcript_with_timestamps.json', {
+    words: edited,
+    note: '含自動標點（由時間差推斷；問句啟發式），標點時間對齊前一字的 end。'
+  });
+});
+
+elBtnUpload.addEventListener('click', async () => {
+  const f = elFile.files?.[0];
+  if (!f) { alert('請先選擇音訊檔'); return; }
+
+  // 1) 播放「乾淨檔」
+  try {
+    const fdClean = new FormData();
+    fdClean.append('audio', f);
+    const respClean = await fetch(`${API_BASE}/api/preview-clean`, { method: 'POST', body: fdClean });
+    if (!respClean.ok) throw new Error('取得乾淨音檔失敗');
+    const buf = await respClean.arrayBuffer();
+    const blob = new Blob([buf], { type: 'audio/wav' });
+    if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
+    localObjectUrl = URL.createObjectURL(blob);
+    elPlayer.src = localObjectUrl;
+  } catch (e) {
+    console.error(e);
+    alert('播放乾淨檔失敗，改播原始檔');
+    if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
+    localObjectUrl = URL.createObjectURL(f);
+    elPlayer.src = localObjectUrl;
+  }
+
+  // 2) 照舊呼叫轉錄（必要時可帶 speaker_labels）
+  setBusy(true, '上傳與轉錄中…（視檔案大小可能 10 秒～數十秒）');
+  try {
+    const fd = new FormData();
+    fd.append('audio', f);
+    // 若要開講者標記，解除下一行註解：
+    // fd.append('speaker_labels', '1');
+
+    const resp = await fetch(`${API_BASE}/api/transcribe`, { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error('轉錄失敗，請稍後再試');
+    const { text, words } = await resp.json();
+
+    currentWords = Array.isArray(words) ? words.map(w => ({
+      start: Number(w.start),
+      end: Number(w.end),
+      word: (w.word ?? w.text ?? '').toString()
+    })) : [];
+
+    const tokensWithPunc = punctuateByGaps(currentWords);
+    renderTranscriptTokens(tokensWithPunc.length ? tokensWithPunc : [], (text || '').toString());
+  } catch (e) {
+    console.error(e);
+    alert(e.message || '轉錄發生錯誤');
+  } finally {
+    setBusy(false, '');
+  }
+});
+
+// 初始化
+(function init() {
+  elTranscript.style.setProperty('--fz', `${elFontRange.value}px`);
+  bindTimeupdate();
+})();
