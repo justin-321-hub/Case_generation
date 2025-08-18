@@ -51,6 +51,15 @@
     <footer class="footer">© API 版 Demo · 前端 GitHub Pages · 後端 Render（Node 代理 AssemblyAI）</footer>
   </div>
 
-  <script type="module" src="./app.js"></script>
+  <!-- 全頁鎖定遮罩（按鈕按下後會顯示） -->
+  <div id="blocker" class="blocker hidden" aria-live="polite" aria-busy="true">
+    <div class="blocker-box">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="block-text" id="blockText">上傳與轉錄中…</div>
+    </div>
+  </div>
+
+  <!-- 非 module，避免 MIME/CORS 導致腳本不執行 -->
+  <script src="./app.js"></script>
 </body>
 </html>
