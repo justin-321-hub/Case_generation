@@ -8,7 +8,7 @@
   --accent: #0f766e;
   --highlight: #a7f3d0;
 
-  /* 新增：控制逐字稿字級 */
+  /* 控制逐字稿字級 */
   --fz: 20px;
 }
 
@@ -20,6 +20,7 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
 .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
 
 .card {
+  position: relative;            /* 讓進度文字就位 */
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -44,7 +45,7 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
 
 .label-inline { font-size: 14px; color: var(--muted); }
 
-.progress { margin-top: 8px; font-size: 14px; color: var(--muted); }
+.progress { margin-top: 8px; font-size: 14px; color: var(--muted); pointer-events: none; }
 .hidden { display: none; }
 
 .player { width: 100%; }
@@ -55,25 +56,25 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
 /* 逐字稿區：父層 font-size:0 來消除 span 間字面空白 */
 .transcript {
   --local-fz: var(--fz);
-  min-height: 40vh; 
-  line-height: 1.9; 
+  min-height: 40vh;
+  line-height: 1.9;
   font-size: 0;                  /* 關鍵：避免任何空白被渲染成間距 */
-  border: 1px solid var(--border); 
-  border-radius: 12px; 
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 14px;
   outline: none;
-  letter-spacing: 0;             /* 中文建議：0 或極小值 */
+  letter-spacing: 0;
   word-break: break-all;
   white-space: pre-wrap;
   font-variant-east-asian: normal;
 }
 
 /* 每個 token 的樣式：用 --fz 控制實際字級 */
-.word { 
-  display: inline;               /* 不要 inline-block，避免額外間距 */
-  padding: 0 2px; 
-  border-radius: 6px; 
-  font-size: var(--local-fz); 
+.word {
+  display: inline;               /* 不用 inline-block，避免額外間距 */
+  padding: 0 2px;
+  border-radius: 6px;
+  font-size: var(--local-fz);
 }
 .word.active { background: var(--highlight); }
 .word:hover { background: #f1f5f9; cursor: pointer; }
@@ -83,3 +84,35 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
 .word.punc.active { background: transparent; }
 
 .footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+
+/* === 全頁鎖定遮罩 === */
+.blocker {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, .35);
+  backdrop-filter: saturate(120%) blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.blocker.hidden { display: none; }
+.blocker-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-weight: 600;
+}
+.spinner {
+  width: 22px; height: 22px;
+  border: 3px solid #e5e7eb;
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
